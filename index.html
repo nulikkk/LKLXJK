@@ -212,6 +212,7 @@ body {
 .timeline-date { font-size: 0.8rem; color: #c97a8e; font-weight: bold; }
 .timeline-title { font-size: 1rem; font-weight: bold; color: #6d3a4a; margin: 2px 0; }
 .timeline-desc { font-size: 0.85rem; color: #9b7a86; line-height: 1.5; }
+.timeline-img { max-width:100%; border-radius:12px; margin-top:10px; display:block; box-shadow:0 2px 8px rgba(0,0,0,0.08); }
 
 /* ===== Diary ===== */
 .diary-form { display: flex; flex-direction: column; gap: 12px; }
@@ -279,6 +280,21 @@ body {
 .btn-danger { background: #fff; color: #d32f2f; border: 2px solid #ffcdd2; }
 .btn-danger:hover { background: #ffebee; }
 .btn-sm { padding: 6px 14px; font-size: 0.8rem; }
+
+/* Tag filter */
+.tag-btn {
+  padding: 4px 12px;
+  border: 1.5px solid #f0d0da;
+  border-radius: 15px;
+  background: white;
+  color: #b06a7e;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-family: inherit;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.tag-btn:hover, .tag-btn.active { background: var(--pink-light); border-color: var(--pink-deep); color: var(--rose); }
 
 .diary-list { display: flex; flex-direction: column; gap: 12px; }
 .diary-card {
@@ -521,10 +537,13 @@ body {
     </div>
     <div class="card">
       <h4 style="color:#6d3a4a;margin-bottom:10px;">✨ 添加新的纪念时刻</h4>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <input type="date" id="newEventDate" style="padding:10px 14px;border:2px solid #f0d0da;border-radius:25px;font-family:inherit">
         <input type="text" id="newEventTitle" placeholder="事件标题" style="flex:1;min-width:140px;padding:10px 14px;border:2px solid #f0d0da;border-radius:25px;font-family:inherit">
         <input type="text" id="newEventDesc" placeholder="简短描述" style="flex:1;min-width:140px;padding:10px 14px;border:2px solid #f0d0da;border-radius:25px;font-family:inherit">
+        <input type="text" id="newEventImage" placeholder="照片URL（可选）" style="flex:1;min-width:160px;padding:10px 14px;border:2px solid #f0d0da;border-radius:25px;font-family:inherit">
+        <input type="file" id="newEventPhoto" accept="image/*" style="display:none" onchange="compressTimelinePhoto()">
+        <button type="button" class="btn btn-sm" style="background:#f0d0da;color:#6d3a4a;flex-shrink:0" onclick="document.getElementById('newEventPhoto').click()" title="本地上传">📷</button>
         <button class="btn btn-primary" onclick="addTimelineEvent()">添加</button>
       </div>
     </div>
@@ -564,10 +583,12 @@ body {
         <input type="file" id="photoInput" accept="image/*" style="display:none">
       </div>
       <input type="text" id="photoTitle" class="photo-title-input" placeholder="给照片起个名字吧...">
+      <input type="text" id="photoTags" class="photo-title-input" placeholder="标签（用逗号分隔，如：约会,旅行,美食）" style="margin-top:4px">
       <div style="margin-top:8px;text-align:right">
         <button class="btn btn-primary btn-sm" onclick="document.getElementById('photoInput').click()">📤 选择照片</button>
       </div>
     </div>
+    <div id="tagFilter" style="margin-bottom:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
     <div class="photo-grid" id="photoGrid"></div>
   </section>
 
@@ -613,11 +634,7 @@ body {
 
 <script>
 // ============================================================
-//  SUPABASE CONFIG — 部署前请替换为你的项目信息
-//  1. 打开 https://supabase.com 创建项目
-//  2. 进入 Settings → API，复制 Project URL 和 anon/public key
-//  3. 在 SQL Editor 中运行 setup.sql 建表
-//  4. 将下面的 URL 和 KEY 替换为你的实际值
+//  SUPABASE CONFIG
 // ============================================================
 const SUPABASE_URL = 'https://juydfsavldnxlbhrjrko.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_eU-0TmQcW6WGF1ZZgQbukA_swvnyR3E';
@@ -630,6 +647,7 @@ const START_DATE = new Date(2026, 4, 20);
 let currentMood = '😊';
 let editMood = '😊';
 let currentEditId = null;
+let selectedTag = null;
 
 let timelineData = [];
 let diaryData = [];
@@ -665,10 +683,8 @@ async function init() {
   renderAll();
   setupRealtime();
 
-  // Set today's date for diary form
   document.getElementById('diaryDate').value = new Date().toISOString().split('T')[0];
 
-  // Mood selectors
   document.querySelectorAll('#moodSelector .mood-btn').forEach(b => {
     b.addEventListener('click', function() {
       document.querySelectorAll('#moodSelector .mood-btn').forEach(x => x.classList.remove('selected'));
@@ -690,6 +706,7 @@ function renderAll() {
   renderDiaryList();
   renderPhotos();
   renderNotes();
+  renderTagFilter();
 }
 
 // ============================================================
@@ -700,7 +717,7 @@ function setupRealtime() {
     db.channel(table + '-rt')
       .on('postgres_changes', { event: '*', schema: 'public', table }, async () => {
         const { data } = await db.from(table).select('*');
-        if (data) { setter(data); renderFn(); }
+        if (data) { setter(data); renderFn(); if (table === 'photos') renderTagFilter(); }
       }).subscribe();
   };
   watch('timeline', d => { timelineData = d; }, renderTimeline);
@@ -780,7 +797,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 function updateCounter() {
   const now = new Date();
   const diff = now - START_DATE;
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24)) + 1;
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   const h = Math.floor((diff % 86400000) / 3600000);
   const m = Math.floor((diff % 3600000) / 60000);
   const s = Math.floor((diff % 60000) / 1000);
@@ -843,6 +860,7 @@ function renderTimeline() {
       <div class="timeline-date">${item.date}</div>
       <div class="timeline-title">${item.title}</div>
       <div class="timeline-desc">${item.description || ''}</div>
+      ${item.image ? `<img src="${item.image}" class="timeline-img" loading="lazy" onerror="this.style.display='none'">` : ''}
       ${i === sorted.length-1 ? '<div style="margin-top:10px;font-size:1.5rem">💕 未完待续...</div>' : ''}
     </div>
   `).join('');
@@ -852,14 +870,38 @@ async function addTimelineEvent() {
   const date = document.getElementById('newEventDate').value;
   const title = document.getElementById('newEventTitle').value.trim();
   const desc = document.getElementById('newEventDesc').value.trim();
+  const image = document.getElementById('newEventImage').value.trim();
   if (!date || !title) return alert('请填写日期和标题哦~');
-  const { error } = await db.from('timeline').insert([{ date, title, description: desc }]);
+  const { error } = await db.from('timeline').insert([{ date, title, description: desc, image: image || null }]);
   if (error) { alert('添加失败: ' + error.message); return; }
   const { data } = await db.from('timeline').select('*').order('date', { ascending: true });
   if (data) { timelineData = data; renderTimeline(); }
   document.getElementById('newEventDate').value = '';
   document.getElementById('newEventTitle').value = '';
   document.getElementById('newEventDesc').value = '';
+  document.getElementById('newEventImage').value = '';
+  document.getElementById('newEventPhoto').value = '';
+}
+
+// 压缩时间线照片（本地上传 → base64）
+function compressTimelinePhoto() {
+  const file = document.getElementById('newEventPhoto').files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.createElement('canvas');
+      let w = img.width, h = img.height;
+      const maxW = 600;
+      if (w > maxW) { h = h * maxW / w; w = maxW; }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      document.getElementById('newEventImage').value = canvas.toDataURL('image/jpeg', 0.6);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
 }
 
 // ============================================================
@@ -957,12 +999,14 @@ document.getElementById('photoInput').addEventListener('change', function() {
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
       const compressed = canvas.toDataURL('image/jpeg', 0.7);
       const title = document.getElementById('photoTitle').value.trim() || '甜蜜瞬间';
+      const tags = document.getElementById('photoTags').value.trim();
       const date = new Date().toISOString().split('T')[0];
-      const { error } = await db.from('photos').insert([{ title, src: compressed, date }]);
+      const { error } = await db.from('photos').insert([{ title, src: compressed, date, tags }]);
       if (error) { alert('上传失败: ' + error.message); return; }
       const { data } = await db.from('photos').select('*').order('created_at', { ascending: false });
-      if (data) { photoData = data; renderPhotos(); }
+      if (data) { photoData = data; renderPhotos(); renderTagFilter(); }
       document.getElementById('photoTitle').value = '';
+      document.getElementById('photoTags').value = '';
       document.getElementById('photoInput').value = '';
     };
     img.src = e.target.result;
@@ -970,17 +1014,51 @@ document.getElementById('photoInput').addEventListener('change', function() {
   reader.readAsDataURL(file);
 });
 
+// 提取所有标签
+function getAllTags() {
+  const tagSet = new Set();
+  photoData.forEach(p => {
+    if (p.tags) p.tags.split(',').forEach(t => {
+      const tag = t.trim();
+      if (tag) tagSet.add(tag);
+    });
+  });
+  return [...tagSet];
+}
+
+function renderTagFilter() {
+  const container = document.getElementById('tagFilter');
+  const tags = getAllTags();
+  if (tags.length === 0) { container.innerHTML = ''; return; }
+  container.innerHTML = `<span style="font-size:0.85rem;color:#c97a8e;margin-right:4px">🏷️</span>
+    <button class="tag-btn ${selectedTag === null ? 'active' : ''}" onclick="filterByTag(null)">全部</button>
+    ${tags.map(t => `<button class="tag-btn ${selectedTag === t ? 'active' : ''}" onclick="filterByTag('${t}')">${t}</button>`).join('')}`;
+}
+
+function filterByTag(tag) {
+  selectedTag = tag;
+  renderTagFilter();
+  renderPhotos();
+}
+
 function renderPhotos() {
   const c = document.getElementById('photoGrid');
-  if (photoData.length === 0) {
+  let filtered = photoData;
+  if (selectedTag) {
+    filtered = photoData.filter(p => {
+      if (!p.tags) return false;
+      return p.tags.split(',').map(t => t.trim()).includes(selectedTag);
+    });
+  }
+  if (filtered.length === 0) {
     c.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">🖼️</div><p>还没有照片呢，快上传你们的甜蜜合照吧~</p></div>';
     return;
   }
-  c.innerHTML = photoData.map(p => `
+  c.innerHTML = filtered.map(p => `
     <div class="photo-card" onclick="openLightbox(${p.id})">
       <img src="${p.src}" alt="${p.title}" loading="lazy">
       <button class="photo-delete" onclick="event.stopPropagation();deletePhoto(${p.id})">✕</button>
-      <div class="photo-info">${p.title}<br><small>${p.date}</small></div>
+      <div class="photo-info">${p.title}${p.tags ? '<br><small>🏷️ ' + p.tags + '</small>' : ''}<br><small>${p.date}</small></div>
     </div>
   `).join('');
 }
@@ -990,7 +1068,7 @@ async function deletePhoto(id) {
   const { error } = await db.from('photos').delete().eq('id', id);
   if (error) { alert('删除失败: ' + error.message); return; }
   const { data } = await db.from('photos').select('*').order('created_at', { ascending: false });
-  if (data) { photoData = data; renderPhotos(); }
+  if (data) { photoData = data; renderPhotos(); renderTagFilter(); }
 }
 
 function openLightbox(id) {
