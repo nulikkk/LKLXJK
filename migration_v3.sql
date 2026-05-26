@@ -13,7 +13,10 @@ CREATE TABLE IF NOT EXISTS settings (
 ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "public_access" ON settings;
 CREATE POLICY "public_access" ON settings FOR ALL USING (true) WITH CHECK (true);
-ALTER PUBLICATION supabase_realtime ADD TABLE settings;
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE settings;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- 2. 音乐文件存储桶（50MB 单文件限制）
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
