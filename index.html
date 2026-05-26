@@ -1283,53 +1283,103 @@ function renderNotes() {
 let audioEl = null;
 let audioCtx = null;
 let ambientTimer = null;
+let ambientGainNode = null;
 let isPlaying = false;
 
-// Pentatonic scale — always sounds pleasant
-const NOTES = [262, 330, 392, 440, 523, 659, 784, 880, 1047];
+// Romantic chord progression: C → Am → F → G (I-vi-IV-V in C major)
+const CHORDS = [
+  [262, 330, 392, 523],   // C major (C4, E4, G4, C5)
+  [220, 262, 330, 440],   // Am      (A3, C4, E4, A4)
+  [175, 220, 262, 349],   // F major (F3, A3, C4, F4)
+  [196, 247, 294, 392],   // G major (G3, B3, D4, G4)
+];
+let chordIdx = 0;
+
+function createReverb(ctx) {
+  const dur = 3.5, decay = 3;
+  const sr = ctx.sampleRate;
+  const len = sr * dur;
+  const buf = ctx.createBuffer(2, len, sr);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < len; i++) {
+      d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (sr * 0.8));
+    }
+  }
+  return buf;
+}
 
 function startAmbient() {
   if (audioCtx) return;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  playAmbientLoop();
+  ambientGainNode = audioCtx.createGain();
+  ambientGainNode.gain.value = 0.3;
+  // Convolution reverb for lush, dreamy sound
+  const convolver = audioCtx.createConvolver();
+  convolver.buffer = createReverb(audioCtx);
+  const wetGain = audioCtx.createGain();
+  wetGain.gain.value = 0.5;
+  convolver.connect(wetGain);
+  ambientGainNode.connect(convolver);
+  ambientGainNode.connect(audioCtx.destination);
+  wetGain.connect(audioCtx.destination);
+  chordIdx = 0;
+  playChord();
 }
 
-function playAmbientLoop() {
+function playChord() {
   if (!isPlaying) { clearTimeout(ambientTimer); return; }
   const t = audioCtx.currentTime;
-  const f = NOTES[Math.floor(Math.random() * NOTES.length)];
+  const notes = CHORDS[chordIdx % CHORDS.length];
 
-  // Main note
-  makeTone(f, 0.06, t, 3.5);
-  // Harmony
-  makeTone(f * 1.25, 0.03, t + 0.4, 3);
-  makeTone(f * 0.75, 0.02, t + 0.7, 2.5);
+  notes.forEach((freq, i) => {
+    [-0.3, 0.3].forEach(detune => {
+      const osc = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      const filt = audioCtx.createBiquadFilter();
+      osc.type = 'triangle';
+      osc.frequency.value = freq + detune;
+      filt.type = 'lowpass';
+      filt.frequency.value = 600;
+      const st = t + i * 0.55;
+      const ed = st + 4.5;
+      g.gain.setValueAtTime(0, st);
+      g.gain.linearRampToValueAtTime(0.022, st + 0.7);
+      g.gain.exponentialRampToValueAtTime(0.001, ed);
+      osc.connect(filt);
+      filt.connect(g);
+      g.connect(ambientGainNode);
+      osc.start(st);
+      osc.stop(ed + 0.1);
+    });
+  });
 
-  ambientTimer = setTimeout(playAmbientLoop, 2200 + Math.random() * 1800);
-}
+  // Occasional high bell note
+  if (Math.random() < 0.35) {
+    const bell = notes[notes.length - 1] * 2;
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.value = bell;
+    g.gain.setValueAtTime(0, t + 1.5);
+    g.gain.linearRampToValueAtTime(0.015, t + 2.3);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 5);
+    osc.connect(g);
+    g.connect(ambientGainNode);
+    osc.start(t + 1.5);
+    osc.stop(t + 5.1);
+  }
 
-function makeTone(freq, vol, start, dur) {
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  const filt = audioCtx.createBiquadFilter();
-  osc.type = 'sine';
-  osc.frequency.value = freq;
-  filt.type = 'lowpass';
-  filt.frequency.value = 900;
-  osc.connect(filt);
-  filt.connect(gain);
-  gain.connect(audioCtx.destination);
-  gain.gain.setValueAtTime(0, start);
-  gain.gain.linearRampToValueAtTime(vol, start + 0.6);
-  gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
-  osc.start(start);
-  osc.stop(start + dur);
+  chordIdx++;
+  ambientTimer = setTimeout(playChord, 4200);
 }
 
 function stopAmbient() {
   clearTimeout(ambientTimer);
   ambientTimer = null;
-  audioCtx = null;
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  ambientGainNode = null;
+  isPlaying = false;
 }
 
 async function loadMusicSettings() {
@@ -1462,48 +1512,64 @@ function musicSearch() {
   searchResults = [];
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  const signal = controller.signal;
 
-  function done(ok, data) {
+  function fail(msg) {
     clearTimeout(timeout);
-    if (ok && data && data.length) {
-      searchResults = data;
-      renderMusicResults(c);
-    } else if (!ok) {
-      c.innerHTML = '<div class="music-loading">搜索暂不可用<br><span style="font-size:0.7rem">请粘贴链接或 📂 上传本地歌曲</span></div>';
-    } else {
-      c.innerHTML = '<div class="music-loading">没有找到，换个关键词试试</div>';
-    }
+    c.innerHTML = '<div class="music-loading">' + msg + '</div>';
   }
 
-  function tryFallback2() {
-    fetch(`https://api.uomg.com/api/wangyiyun.search?key=${encodeURIComponent(q)}&limit=8`, { signal: controller.signal })
+  function tryFallback3() {
+    fetch(`https://api.uomg.com/api/wangyiyun.search?key=${encodeURIComponent(q)}&limit=8`, { signal })
       .then(r => r.json())
       .then(data => {
-        if (data.code === 1 && data.data) {
-          done(true, data.data.map(s => ({
+        clearTimeout(timeout);
+        if (data.code === 1 && data.data && data.data.length) {
+          searchResults = data.data.map(s => ({
             name: s.songname || s.name || '未知',
             artist: s.singer || s.artist || '',
             url: s.url || s.mp3url || ''
-          })));
-        } else { done(true, null); }
+          }));
+          renderMusicResults(c);
+        } else { fail('没有找到，换个关键词试试'); }
       })
-      .catch(() => { done(false); });
+      .catch(() => fail('搜索暂不可用<br><span style="font-size:0.7rem">请粘贴链接或 📂 上传本地歌曲</span>'));
   }
 
-  // Try vvhan first
-  fetch(`https://api.vvhan.com/api/wangyiyun?key=${encodeURIComponent(q)}&type=song&limit=8`, { signal: controller.signal })
+  function tryFallback2() {
+    fetch(`https://api.vvhan.com/api/wangyiyun?key=${encodeURIComponent(q)}&type=song&limit=8`, { signal })
+      .then(r => r.json())
+      .then(data => {
+        clearTimeout(timeout);
+        if (data.success && data.data && data.data.length) {
+          searchResults = data.data.map(s => ({
+            name: s.songname || s.name || '未知',
+            artist: s.artist || s.author || '',
+            url: s.url || s.mp3url || s.musicurl || ''
+          }));
+          renderMusicResults(c);
+        } else { tryFallback3(); }
+      })
+      .catch(() => tryFallback3());
+  }
+
+  // Primary: Meting API (widely used, most reliable)
+  fetch(`https://api.injahow.cn/meting/?server=netease&type=search&id=${encodeURIComponent(q)}`, { signal })
     .then(r => r.json())
     .then(data => {
-      if (data.success && data.data && data.data.length) {
-        done(true, data.data.map(s => ({
-          name: s.songname || s.name || '未知',
-          artist: s.artist || s.author || '',
-          url: s.url || s.mp3url || s.musicurl || ''
-        })));
+      clearTimeout(timeout);
+      if (Array.isArray(data) && data.length) {
+        searchResults = data.slice(0, 8).map(s => ({
+          id: s.id || '',
+          name: s.name || s.songname || '未知',
+          artist: s.artist || s.singer || '',
+          url: s.url || ''  // may be empty, fetched on click
+        }));
+        renderMusicResults(c);
       } else { tryFallback2(); }
     })
-    .catch(() => { tryFallback2(); });
+    .catch(() => tryFallback2());
 }
 
 function renderMusicResults(c) {
@@ -1521,21 +1587,29 @@ function renderMusicResults(c) {
 
 async function musicPlayResult(i) {
   const r = searchResults[i];
-  if (!r || !r.url) return alert('这首歌暂无播放链接，请换个试试～');
-  // Filter out invalid URLs
-  if (r.url.startsWith('http')) {
-    document.getElementById('musicUrlInput').value = r.url;
-    await db.from('settings').upsert({ key: 'music_url', value: r.url });
-    stopAmbient();
-    musicSetupAudio(r.url);
-    document.getElementById('musicStatus').textContent = '🎵 ' + r.name + ' - ' + r.artist;
-    document.getElementById('musicResults').innerHTML = '';
-    document.getElementById('musicSearch').value = '';
-    document.getElementById('musicPanel').classList.remove('show');
-    if (!isPlaying) musicTogglePlay();
-  } else {
-    alert('这首歌链接无效，请换个试试～');
+  if (!r) return;
+
+  // Lazy-fetch play URL if not already available
+  if (!r.url && r.id) {
+    document.getElementById('musicStatus').textContent = '⏳ 获取播放链接...';
+    try {
+      const resp = await fetch(`https://api.injahow.cn/meting/?server=netease&type=url&id=${r.id}`);
+      const data = await resp.json();
+      r.url = (data && data.url) || '';
+    } catch(e) { r.url = ''; }
   }
+
+  if (!r.url || !r.url.startsWith('http')) return alert('这首歌暂无播放链接，请换个试试～');
+
+  document.getElementById('musicUrlInput').value = r.url;
+  await db.from('settings').upsert({ key: 'music_url', value: r.url });
+  stopAmbient();
+  musicSetupAudio(r.url);
+  document.getElementById('musicStatus').textContent = '🎵 ' + r.name + ' - ' + r.artist;
+  document.getElementById('musicResults').innerHTML = '';
+  document.getElementById('musicSearch').value = '';
+  document.getElementById('musicPanel').classList.remove('show');
+  if (!isPlaying) musicTogglePlay();
 }
 
 function musicTogglePlay() {
