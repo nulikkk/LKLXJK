@@ -1284,7 +1284,7 @@ async function loadMusicList() {
       return;
     }
     list.innerHTML = musicFileList.map((f, i) => {
-      const name = f.name.replace(/_\d{13}\.[^.]+$/, '').replace(/\.[^.]+$/, '');
+      const name = musicDisplayName(f.name);
       const isActive = currentSong && currentSong.name === f.name;
       return `<div class="music-playlist-item${isActive ? ' active' : ''}" onclick="musicPlayFromList(${i})">
         <span class="mpi-name">🎵 ${name}</span>
@@ -1314,7 +1314,7 @@ function musicPlayFromList(i) {
     isPlaying = true;
     document.getElementById('musicPlayBtn').textContent = '⏸';
     document.getElementById('musicBtn').classList.add('playing');
-    document.getElementById('musicStatus').textContent = '🎵 ' + f.name.replace(/_\d{13}\.[^.]+$/, '').replace(/\.[^.]+$/, '');
+    document.getElementById('musicStatus').textContent = '🎵 ' + musicDisplayName(f.name);
     musicSpawnNotes();
     db.from('settings').upsert({ key: 'music_url', value: url });
   }).catch(() => {
@@ -1326,7 +1326,7 @@ function musicPlayFromList(i) {
 async function musicDeleteSong(i) {
   const f = musicFileList[i];
   if (!f) return;
-  if (!confirm('确定删除 "' + f.name + '" 吗？')) return;
+  if (!confirm('确定删除 "' + musicDisplayName(f.name) + '" 吗？')) return;
   const { error } = await db.storage.from('music').remove([f.name]);
   if (error) return alert('删除失败: ' + error.message);
   if (currentSong && currentSong.name === f.name) {
@@ -1374,9 +1374,9 @@ async function musicUploadFile() {
   const dotIdx = file.name.lastIndexOf('.');
   const base = dotIdx > 0 ? file.name.substring(0, dotIdx) : file.name;
   const ext = dotIdx > 0 ? file.name.substring(dotIdx + 1).toLowerCase() : 'mp3';
-  // Supabase Storage only accepts ASCII-safe keys; strip Chinese/Unicode
-  let safeName = base.replace(/[^a-zA-Z0-9\-_]/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
-  if (!safeName || safeName.length < 2) safeName = 'song';
+  // Base64url-encode UTF-8 to keep Chinese in ASCII-safe form for Supabase Storage
+  let safeName = b64Encode(base);
+  if (safeName.length > 100) safeName = safeName.substring(0, 100);
   safeName = safeName + '_' + Date.now() + '.' + ext;
 
   document.getElementById('musicStatus').textContent = '⬆️ 上传中...';
@@ -1394,6 +1394,36 @@ async function musicUploadFile() {
   document.getElementById('musicFileInput').value = '';
   document.getElementById('musicStatus').textContent = '✅ 上传成功';
   loadMusicList();
+}
+
+// UTF-8 → base64url (ASCII-safe, reversible)
+function b64Encode(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  bytes.forEach(b => bin += String.fromCharCode(b));
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64Decode(enc) {
+  let b64 = enc.replace(/-/g, '+').replace(/_/g, '/');
+  while (b64.length % 4) b64 += '=';
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+// Extract display name from storage key (decode base64url part before _timestamp.ext)
+function musicDisplayName(key) {
+  const noExt = key.replace(/\.[^.]+$/, '');
+  const lastUnderscore = noExt.lastIndexOf('_');
+  if (lastUnderscore < 0) return key;
+  const tsPart = noExt.substring(lastUnderscore + 1);
+  // Timestamp is 13 digits
+  if (/^\d{13}$/.test(tsPart)) {
+    const encoded = noExt.substring(0, lastUnderscore);
+    try { return b64Decode(encoded); } catch(e) { return encoded; }
+  }
+  return noExt;
 }
 
 function musicTogglePanel() {
