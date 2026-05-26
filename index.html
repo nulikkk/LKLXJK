@@ -1370,15 +1370,22 @@ async function musicUploadFile() {
   const file = document.getElementById('musicFileInput').files[0];
   if (!file) return;
   if (file.size > 50 * 1024 * 1024) return alert('文件太大了，请选 50MB 以内的～');
+
+  // Sanitize filename: keep Chinese/Unicode, strip path-unsafe chars
+  const dotIdx = file.name.lastIndexOf('.');
+  const base = dotIdx > 0 ? file.name.substring(0, dotIdx) : file.name;
+  const ext = dotIdx > 0 ? file.name.substring(dotIdx + 1).toLowerCase() : 'mp3';
+  let safeName = base.replace(/[\\/:*?"<>|#%&{}$!'`@+=~^\s]+/g, '_').replace(/^_+|_+$/g, '');
+  if (!safeName || safeName.length > 80) safeName = 'song_' + Date.now();
+  safeName = safeName + '.' + ext;
+
   document.getElementById('musicStatus').textContent = '⬆️ 上传中...';
-  const { data, error } = await db.storage.from('music').upload(file.name, file, {
+  const { data, error } = await db.storage.from('music').upload(safeName, file, {
     cacheControl: '3600', upsert: true, contentType: file.type || 'audio/mpeg'
   });
   if (error) {
-    if (error.message.includes('not found') || error.message.includes('bucket')) {
-      return alert('请先在 Supabase Storage 中创建名为 music 的公开存储桶～');
-    }
-    return alert('上传失败: ' + error.message);
+    document.getElementById('musicStatus').textContent = '❌ 上传失败';
+    return alert('上传失败: ' + error.message + '\n\n如持续失败，请在 Supabase SQL Editor 运行 migration_v3.sql');
   }
   document.getElementById('musicFileInput').value = '';
   document.getElementById('musicStatus').textContent = '✅ 上传成功';

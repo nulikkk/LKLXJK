@@ -1,6 +1,7 @@
 -- ============================================================
 --  恋爱小窝 V3 数据库迁移
 --  新增: settings 表 + music 存储桶
+--  如已运行过，重新运行此文件也会更新 bucket 限制和策略
 -- ============================================================
 
 -- 1. 配置表（存储音乐链接等设置）
@@ -10,13 +11,23 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "public_access" ON settings;
 CREATE POLICY "public_access" ON settings FOR ALL USING (true) WITH CHECK (true);
 ALTER PUBLICATION supabase_realtime ADD TABLE settings;
 
 -- 2. 音乐文件存储桶（50MB 单文件限制）
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('music', 'music', true, 52428800, '{audio/wav,audio/mpeg,audio/mp3,audio/mpeg3,audio/x-mpeg-3,audio/ogg,audio/flac,audio/x-flac,audio/aac}')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET file_size_limit = 52428800, allowed_mime_types = '{audio/wav,audio/mpeg,audio/mp3,audio/mpeg3,audio/x-mpeg-3,audio/ogg,audio/flac,audio/x-flac,audio/aac}';
 
-CREATE POLICY "public_music_access" ON storage.objects
-FOR ALL USING (bucket_id = 'music') WITH CHECK (bucket_id = 'music');
+-- 3. Storage 访问策略（分操作类型，避免权限冲突）
+DROP POLICY IF EXISTS "public_music_access" ON storage.objects;
+DROP POLICY IF EXISTS "public_music_select" ON storage.objects;
+DROP POLICY IF EXISTS "public_music_insert" ON storage.objects;
+DROP POLICY IF EXISTS "public_music_update" ON storage.objects;
+DROP POLICY IF EXISTS "public_music_delete" ON storage.objects;
+
+CREATE POLICY "public_music_select" ON storage.objects FOR SELECT USING (bucket_id = 'music');
+CREATE POLICY "public_music_insert" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'music');
+CREATE POLICY "public_music_update" ON storage.objects FOR UPDATE USING (bucket_id = 'music') WITH CHECK (bucket_id = 'music');
+CREATE POLICY "public_music_delete" ON storage.objects FOR DELETE USING (bucket_id = 'music');
