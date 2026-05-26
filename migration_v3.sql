@@ -13,9 +13,9 @@ ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "public_access" ON settings FOR ALL USING (true) WITH CHECK (true);
 ALTER PUBLICATION supabase_realtime ADD TABLE settings;
 
--- 2. 音乐文件存储桶
+-- 2. 音乐文件存储桶（50MB 单文件限制）
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES ('music', 'music', true, 10485760, '{audio/wav,audio/mpeg,audio/mp3,audio/mpeg3,audio/x-mpeg-3,audio/ogg}')
+VALUES ('music', 'music', true, 52428800, '{audio/wav,audio/mpeg,audio/mp3,audio/mpeg3,audio/x-mpeg-3,audio/ogg,audio/flac,audio/x-flac,audio/aac}')
 ON CONFLICT (id) DO NOTHING;
 
 CREATE POLICY "public_music_access" ON storage.objects

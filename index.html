@@ -1369,7 +1369,7 @@ function musicSetVolume(v) {
 async function musicUploadFile() {
   const file = document.getElementById('musicFileInput').files[0];
   if (!file) return;
-  if (file.size > 10 * 1024 * 1024) return alert('文件太大了，请选 10MB 以内的～');
+  if (file.size > 50 * 1024 * 1024) return alert('文件太大了，请选 50MB 以内的～');
   document.getElementById('musicStatus').textContent = '⬆️ 上传中...';
   const { data, error } = await db.storage.from('music').upload(file.name, file, {
     cacheControl: '3600', upsert: true, contentType: file.type || 'audio/mpeg'
