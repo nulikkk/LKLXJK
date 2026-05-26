@@ -1284,7 +1284,7 @@ async function loadMusicList() {
       return;
     }
     list.innerHTML = musicFileList.map((f, i) => {
-      const name = f.name.replace(/\.[^.]+$/, '');
+      const name = f.name.replace(/_\d{13}\.[^.]+$/, '').replace(/\.[^.]+$/, '');
       const isActive = currentSong && currentSong.name === f.name;
       return `<div class="music-playlist-item${isActive ? ' active' : ''}" onclick="musicPlayFromList(${i})">
         <span class="mpi-name">🎵 ${name}</span>
@@ -1314,7 +1314,7 @@ function musicPlayFromList(i) {
     isPlaying = true;
     document.getElementById('musicPlayBtn').textContent = '⏸';
     document.getElementById('musicBtn').classList.add('playing');
-    document.getElementById('musicStatus').textContent = '🎵 ' + f.name.replace(/\.[^.]+$/, '');
+    document.getElementById('musicStatus').textContent = '🎵 ' + f.name.replace(/_\d{13}\.[^.]+$/, '').replace(/\.[^.]+$/, '');
     musicSpawnNotes();
     db.from('settings').upsert({ key: 'music_url', value: url });
   }).catch(() => {
@@ -1374,8 +1374,9 @@ async function musicUploadFile() {
   const dotIdx = file.name.lastIndexOf('.');
   const base = dotIdx > 0 ? file.name.substring(0, dotIdx) : file.name;
   const ext = dotIdx > 0 ? file.name.substring(dotIdx + 1).toLowerCase() : 'mp3';
-  let safeName = base.replace(/[\\/:*?"<>|#%&{}$!'`@+=~^\s]+/g, '_').replace(/^_+|_+$/g, '');
-  if (!safeName || safeName.length > 80) safeName = 'song_' + Date.now();
+  // Supabase Storage only accepts ASCII-safe keys; strip Chinese/Unicode
+  let safeName = base.replace(/[^a-zA-Z0-9\-_]/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  if (!safeName || safeName.length < 2) safeName = 'song';
   safeName = safeName + '_' + Date.now() + '.' + ext;
 
   document.getElementById('musicStatus').textContent = '⬆️ 上传中...';
