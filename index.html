@@ -474,6 +474,88 @@ body {
 /* ===== Sync Status ===== */
 #syncStatus { transition: all 0.3s; }
 
+/* ===== Music Player ===== */
+.music-player {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.music-btn {
+  width: 54px; height: 54px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, var(--rose), var(--coral));
+  box-shadow: 0 4px 16px rgba(233,30,99,0.35);
+  cursor: pointer;
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+}
+.music-btn:hover { transform: scale(1.1); }
+.music-btn.playing { animation: spinDisc 3s linear infinite; }
+@keyframes spinDisc {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.music-panel {
+  background: rgba(255,255,255,0.95);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  padding: 14px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+  width: 260px;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+}
+.music-panel.show { display: flex; }
+.music-panel input {
+  padding: 8px 12px;
+  border: 2px solid #f0d0da;
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  width: 100%;
+}
+.music-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.music-ctrl button {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: var(--pink-light);
+  cursor: pointer;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.music-ctrl button:hover { background: var(--pink); }
+
+/* ===== Floating Notes ===== */
+.note-float {
+  position: fixed;
+  font-size: 20px;
+  pointer-events: none;
+  z-index: 199;
+  animation: noteUp 2s ease-out forwards;
+}
+@keyframes noteUp {
+  0% { opacity: 1; transform: translateY(0) rotate(0deg) scale(1); }
+  100% { opacity: 0; transform: translateY(-100px) rotate(20deg) scale(0.5); }
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 600px) {
   .app-container { padding: 10px; }
@@ -604,6 +686,23 @@ body {
     <div class="notes-wall" id="notesWall"></div>
   </section>
 
+  <!-- ===== Music Player ===== -->
+  <div class="music-player" id="musicPlayer">
+    <div class="music-panel" id="musicPanel">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:bold;color:var(--rose);font-size:0.85rem">🎵 音乐</span>
+        <button onclick="musicHidePanel()" style="background:none;border:none;cursor:pointer;font-size:14px;color:#999">✕</button>
+      </div>
+      <input type="text" id="musicUrlInput" placeholder="粘贴音乐链接..." spellcheck="false">
+      <div class="music-ctrl">
+        <button onclick="musicTogglePlay()" id="musicPlayBtn">▶️</button>
+        <input type="range" id="musicVolume" min="0" max="1" step="0.1" value="0.5" style="flex:1;height:4px;accent-color:var(--rose)" oninput="musicSetVolume(this.value)">
+      </div>
+      <div style="font-size:0.7rem;color:#b06a7e;text-align:center" id="musicStatus">🎹 点击页面任意位置开始</div>
+    </div>
+    <button class="music-btn" id="musicBtn" onclick="musicTogglePanel()" title="背景音乐">💿</button>
+  </div>
+
   <!-- ===== Lightbox ===== -->
   <div class="lightbox" id="lightbox">
     <img src="" alt="" id="lightboxImg">
@@ -682,6 +781,7 @@ async function init() {
 
   renderAll();
   setupRealtime();
+  loadMusicSettings();
 
   document.getElementById('diaryDate').value = new Date().toISOString().split('T')[0];
 
@@ -1126,6 +1226,154 @@ function renderNotes() {
     </div>
   `).join('');
 }
+
+// ============================================================
+//  MUSIC PLAYER
+// ============================================================
+let audioEl = null;
+let audioCtx = null;
+let ambientTimer = null;
+let isPlaying = false;
+
+// Pentatonic scale — always sounds pleasant
+const NOTES = [262, 330, 392, 440, 523, 659, 784, 880, 1047];
+
+function startAmbient() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  playAmbientLoop();
+}
+
+function playAmbientLoop() {
+  if (!isPlaying) { clearTimeout(ambientTimer); return; }
+  const t = audioCtx.currentTime;
+  const f = NOTES[Math.floor(Math.random() * NOTES.length)];
+
+  // Main note
+  makeTone(f, 0.06, t, 3.5);
+  // Harmony
+  makeTone(f * 1.25, 0.03, t + 0.4, 3);
+  makeTone(f * 0.75, 0.02, t + 0.7, 2.5);
+
+  ambientTimer = setTimeout(playAmbientLoop, 2200 + Math.random() * 1800);
+}
+
+function makeTone(freq, vol, start, dur) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  const filt = audioCtx.createBiquadFilter();
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  filt.type = 'lowpass';
+  filt.frequency.value = 900;
+  osc.connect(filt);
+  filt.connect(gain);
+  gain.connect(audioCtx.destination);
+  gain.gain.setValueAtTime(0, start);
+  gain.gain.linearRampToValueAtTime(vol, start + 0.6);
+  gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+  osc.start(start);
+  osc.stop(start + dur);
+}
+
+function stopAmbient() {
+  clearTimeout(ambientTimer);
+  ambientTimer = null;
+  audioCtx = null;
+}
+
+async function loadMusicSettings() {
+  try {
+    const { data } = await db.from('settings').select('value').eq('key', 'music_url').maybeSingle();
+    if (data && data.value) {
+      document.getElementById('musicUrlInput').value = data.value;
+      musicSetupAudio(data.value);
+      document.getElementById('musicStatus').textContent = '🎵 自定义歌曲';
+    } else {
+      document.getElementById('musicStatus').textContent = '🎹 默认旋律';
+    }
+  } catch(e) {}
+}
+
+async function musicSaveUrl() {
+  const url = document.getElementById('musicUrlInput').value.trim();
+  try {
+    if (url) {
+      await db.from('settings').upsert({ key: 'music_url', value: url });
+      stopAmbient();
+      musicSetupAudio(url);
+      document.getElementById('musicStatus').textContent = '🎵 自定义歌曲';
+    } else {
+      await db.from('settings').upsert({ key: 'music_url', value: '' });
+      document.getElementById('musicStatus').textContent = '🎹 默认旋律';
+    }
+  } catch(e) { alert('保存失败: ' + e.message); }
+}
+
+function musicSetupAudio(url) {
+  if (audioEl) { audioEl.pause(); audioEl = null; }
+  if (!url) return;
+  audioEl = new Audio(url);
+  audioEl.loop = true;
+  audioEl.volume = parseFloat(document.getElementById('musicVolume').value) || 0.5;
+}
+
+function musicTogglePanel() { document.getElementById('musicPanel').classList.toggle('show'); }
+function musicHidePanel() { document.getElementById('musicPanel').classList.remove('show'); }
+
+function musicTogglePlay() {
+  const btn = document.getElementById('musicPlayBtn');
+  const disc = document.getElementById('musicBtn');
+
+  if (isPlaying) {
+    // Stop
+    if (audioEl) audioEl.pause();
+    stopAmbient();
+    btn.textContent = '▶️'; disc.classList.remove('playing'); isPlaying = false;
+  } else {
+    // Play
+    if (audioEl) {
+      audioEl.play().then(() => {
+        btn.textContent = '⏸'; disc.classList.add('playing'); isPlaying = true;
+        musicSpawnNotes();
+      }).catch(() => { document.getElementById('musicStatus').textContent = '⚠️ 播放失败'; });
+    } else {
+      startAmbient();
+      btn.textContent = '⏸'; disc.classList.add('playing'); isPlaying = true;
+      musicSpawnNotes();
+    }
+  }
+}
+
+function musicSetVolume(v) {
+  if (audioEl) audioEl.volume = parseFloat(v);
+}
+
+function musicSpawnNotes() {
+  if (!isPlaying) return;
+  const rect = document.getElementById('musicBtn').getBoundingClientRect();
+  const notes = ['🎵', '🎶', '💕', '✨'];
+  const el = document.createElement('div');
+  el.className = 'note-float';
+  el.textContent = notes[Math.floor(Math.random() * notes.length)];
+  el.style.left = (rect.left + rect.width / 2 - 10 + (Math.random() - 0.5) * 40) + 'px';
+  el.style.bottom = (window.innerHeight - rect.top + 10) + 'px';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2000);
+  setTimeout(musicSpawnNotes, 800 + Math.random() * 1200);
+}
+
+// Auto-play on first click anywhere
+let musicAutoStarted = false;
+document.addEventListener('click', function() {
+  if (musicAutoStarted) return;
+  musicAutoStarted = true;
+  musicTogglePlay();
+  document.getElementById('musicStatus').textContent =
+    audioEl ? '🎵 自定义歌曲' : '🎹 默认旋律';
+}, { once: false });
+
+document.getElementById('musicUrlInput').addEventListener('change', musicSaveUrl);
 
 // ============================================================
 //  MISC
