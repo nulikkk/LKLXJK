@@ -543,35 +543,15 @@ body {
 }
 .music-ctrl button:hover { background: var(--pink); }
 
-/* Music search */
-.music-search { display: flex; gap: 6px; margin-bottom: 4px; }
-.music-search input {
-  flex: 1;
-  padding: 6px 10px;
-  border: 2px solid #f0d0da;
-  border-radius: 12px;
-  font-family: inherit;
-  font-size: 0.8rem;
-  min-width: 0;
-}
-.music-search button {
-  width: 32px; height: 32px;
-  border-radius: 50%;
-  border: none;
-  background: var(--pink-light);
-  cursor: pointer;
-  font-size: 14px;
-  flex-shrink: 0;
-}
-.music-results {
-  max-height: 180px;
+/* Music playlist */
+.music-playlist {
+  max-height: 200px;
   overflow-y: auto;
   margin-bottom: 4px;
 }
-.music-results::-webkit-scrollbar { width: 4px; }
-.music-results::-webkit-scrollbar-thumb { background: var(--pink); border-radius: 2px; }
-.music-loading { text-align: center; color: #999; padding: 10px; font-size: 0.8rem; }
-.music-result-item {
+.music-playlist::-webkit-scrollbar { width: 4px; }
+.music-playlist::-webkit-scrollbar-thumb { background: var(--pink); border-radius: 2px; }
+.music-playlist-item {
   padding: 8px 10px;
   border-radius: 8px;
   cursor: pointer;
@@ -582,9 +562,22 @@ body {
   justify-content: space-between;
   align-items: center;
 }
-.music-result-item:hover { background: var(--pink-light); }
-.music-result-item .mri-name { font-weight: 500; color: #5d3a4a; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.music-result-item .mri-artist { font-size: 0.7rem; color: #999; margin-left: 6px; flex-shrink: 0; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-playlist-item:hover { background: var(--pink-light); }
+.music-playlist-item.active { background: #ffe0ea; }
+.music-playlist-item .mpi-name { font-weight: 500; color: #5d3a4a; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-playlist-item .mpi-del {
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #ccc;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+.music-playlist-item .mpi-del:hover { color: var(--rose); background: #fff0f3; }
+.music-status { text-align: center; color: #999; padding: 8px; font-size: 0.75rem; }
 
 /* ===== Floating Notes ===== */
 .note-float {
@@ -732,25 +725,20 @@ body {
   <!-- ===== Music Player ===== -->
   <div class="music-player" id="musicPlayer">
     <div class="music-panel" id="musicPanel">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <span style="font-weight:bold;color:var(--rose);font-size:0.85rem">🎵 音乐</span>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-weight:bold;color:var(--rose);font-size:0.85rem">🎵 我的歌单</span>
         <button onclick="musicHidePanel()" style="background:none;border:none;cursor:pointer;font-size:14px;color:#999">✕</button>
       </div>
-      <div class="music-search">
-        <input type="text" id="musicSearch" placeholder="搜索歌曲名或歌手..." spellcheck="false" onkeydown="if(event.key==='Enter')musicSearch()">
-        <button onclick="musicSearch()" style="display:flex;align-items:center;justify-content:center">🔍</button>
-      </div>
-      <div id="musicResults" class="music-results"></div>
       <div class="music-ctrl">
         <button onclick="musicTogglePlay()" id="musicPlayBtn">▶️</button>
         <input type="range" id="musicVolume" min="0" max="1" step="0.1" value="0.5" style="flex:1;height:4px;accent-color:var(--rose)" oninput="musicSetVolume(this.value)">
-        <button onclick="document.getElementById('musicFileInput').click()" title="上传本地歌曲" style="font-size:12px">📂</button>
+        <button onclick="document.getElementById('musicFileInput').click()" title="上传歌曲" style="font-size:14px">📂</button>
       </div>
-      <div style="font-size:0.7rem;color:#b06a7e;text-align:center" id="musicStatus">🎹 点击页面任意位置开始</div>
-      <input type="text" id="musicUrlInput" placeholder="或直接粘贴音乐链接..." spellcheck="false" style="margin-top:4px;padding:6px 10px;border:2px solid #f0d0da;border-radius:12px;font-family:inherit;font-size:0.75rem;width:100%">
+      <div class="music-playlist" id="musicPlaylist"></div>
+      <div style="font-size:0.7rem;color:#b06a7e;text-align:center" id="musicStatus">📂 上传歌曲到歌单</div>
       <input type="file" id="musicFileInput" accept="audio/*" style="display:none" onchange="musicUploadFile()">
     </div>
-    <button class="music-btn" id="musicBtn" onclick="musicTogglePanel()" title="背景音乐">💿</button>
+    <button class="music-btn" id="musicBtn" onclick="musicTogglePanel()" title="音乐">💿</button>
   </div>
 
   <!-- ===== Lightbox ===== -->
@@ -831,7 +819,7 @@ async function init() {
 
   renderAll();
   setupRealtime();
-  loadMusicSettings();
+  loadMusicList();
 
   document.getElementById('diaryDate').value = new Date().toISOString().split('T')[0];
 
@@ -1281,358 +1269,95 @@ function renderNotes() {
 //  MUSIC PLAYER
 // ============================================================
 let audioEl = null;
-let audioCtx = null;
-let ambientTimer = null;
-let ambientGainNode = null;
 let isPlaying = false;
+let currentSong = null;
+let musicFileList = [];
 
-// Romantic chord progression: C → Am → F → G (I-vi-IV-V in C major)
-const CHORDS = [
-  [262, 330, 392, 523],   // C major (C4, E4, G4, C5)
-  [220, 262, 330, 440],   // Am      (A3, C4, E4, A4)
-  [175, 220, 262, 349],   // F major (F3, A3, C4, F4)
-  [196, 247, 294, 392],   // G major (G3, B3, D4, G4)
-];
-let chordIdx = 0;
-
-function createReverb(ctx) {
-  const dur = 3.5, decay = 3;
-  const sr = ctx.sampleRate;
-  const len = sr * dur;
-  const buf = ctx.createBuffer(2, len, sr);
-  for (let ch = 0; ch < 2; ch++) {
-    const d = buf.getChannelData(ch);
-    for (let i = 0; i < len; i++) {
-      d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (sr * 0.8));
+async function loadMusicList() {
+  const list = document.getElementById('musicPlaylist');
+  try {
+    const { data, error } = await db.storage.from('music').list();
+    if (error) throw error;
+    musicFileList = (data || []).filter(f => f.name !== '.emptyFolderPlaceholder' && f.id);
+    if (!musicFileList.length) {
+      list.innerHTML = '<div class="music-status">还没有歌曲，点 📂 上传</div>';
+      return;
+    }
+    list.innerHTML = musicFileList.map((f, i) => {
+      const name = f.name.replace(/\.[^.]+$/, '');
+      const isActive = currentSong && currentSong.name === f.name;
+      return `<div class="music-playlist-item${isActive ? ' active' : ''}" onclick="musicPlayFromList(${i})">
+        <span class="mpi-name">🎵 ${name}</span>
+        <button class="mpi-del" onclick="event.stopPropagation();musicDeleteSong(${i})" title="删除">🗑</button>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    if (e.message && e.message.includes('not found')) {
+      list.innerHTML = '<div class="music-status">请先在 Supabase 创建 music 存储桶</div>';
+    } else {
+      list.innerHTML = '<div class="music-status">加载歌单失败</div>';
     }
   }
-  return buf;
 }
 
-function startAmbient() {
-  if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  ambientGainNode = audioCtx.createGain();
-  ambientGainNode.gain.value = 0.3;
-  // Convolution reverb for lush, dreamy sound
-  const convolver = audioCtx.createConvolver();
-  convolver.buffer = createReverb(audioCtx);
-  const wetGain = audioCtx.createGain();
-  wetGain.gain.value = 0.5;
-  convolver.connect(wetGain);
-  ambientGainNode.connect(convolver);
-  ambientGainNode.connect(audioCtx.destination);
-  wetGain.connect(audioCtx.destination);
-  chordIdx = 0;
-  playChord();
-}
-
-function playChord() {
-  if (!isPlaying) { clearTimeout(ambientTimer); return; }
-  const t = audioCtx.currentTime;
-  const notes = CHORDS[chordIdx % CHORDS.length];
-
-  notes.forEach((freq, i) => {
-    [-0.3, 0.3].forEach(detune => {
-      const osc = audioCtx.createOscillator();
-      const g = audioCtx.createGain();
-      const filt = audioCtx.createBiquadFilter();
-      osc.type = 'triangle';
-      osc.frequency.value = freq + detune;
-      filt.type = 'lowpass';
-      filt.frequency.value = 600;
-      const st = t + i * 0.55;
-      const ed = st + 4.5;
-      g.gain.setValueAtTime(0, st);
-      g.gain.linearRampToValueAtTime(0.022, st + 0.7);
-      g.gain.exponentialRampToValueAtTime(0.001, ed);
-      osc.connect(filt);
-      filt.connect(g);
-      g.connect(ambientGainNode);
-      osc.start(st);
-      osc.stop(ed + 0.1);
-    });
-  });
-
-  // Occasional high bell note
-  if (Math.random() < 0.35) {
-    const bell = notes[notes.length - 1] * 2;
-    const osc = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.value = bell;
-    g.gain.setValueAtTime(0, t + 1.5);
-    g.gain.linearRampToValueAtTime(0.015, t + 2.3);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 5);
-    osc.connect(g);
-    g.connect(ambientGainNode);
-    osc.start(t + 1.5);
-    osc.stop(t + 5.1);
-  }
-
-  chordIdx++;
-  ambientTimer = setTimeout(playChord, 4200);
-}
-
-function stopAmbient() {
-  clearTimeout(ambientTimer);
-  ambientTimer = null;
-  if (audioCtx) { audioCtx.close(); audioCtx = null; }
-  ambientGainNode = null;
-  isPlaying = false;
-}
-
-async function loadMusicSettings() {
-  try {
-    const { data } = await db.from('settings').select('value').eq('key', 'music_url').maybeSingle();
-    if (data && data.value) {
-      document.getElementById('musicUrlInput').value = data.value;
-      musicSetupAudio(data.value);
-      document.getElementById('musicStatus').textContent = '🎵 自定义歌曲';
-    } else {
-      document.getElementById('musicStatus').textContent = '🎹 默认旋律';
-    }
-  } catch(e) {}
-}
-
-async function musicSaveUrl() {
-  const url = document.getElementById('musicUrlInput').value.trim();
-  try {
-    if (url) {
-      await db.from('settings').upsert({ key: 'music_url', value: url });
-      stopAmbient();
-      musicSetupAudio(url);
-      document.getElementById('musicStatus').textContent = '🎵 自定义歌曲';
-    } else {
-      await db.from('settings').upsert({ key: 'music_url', value: '' });
-      document.getElementById('musicStatus').textContent = '🎹 默认旋律';
-    }
-  } catch(e) { alert('保存失败: ' + e.message); }
-}
-
-function musicSetupAudio(url) {
+function musicPlayFromList(i) {
+  const f = musicFileList[i];
+  if (!f) return;
   if (audioEl) { audioEl.pause(); audioEl = null; }
-  if (!url) return;
+  const { data: urlData } = db.storage.from('music').getPublicUrl(f.name);
+  const url = urlData.publicUrl;
   audioEl = new Audio(url);
   audioEl.loop = true;
   audioEl.volume = parseFloat(document.getElementById('musicVolume').value) || 0.5;
-}
-
-async function musicUploadFile() {
-  const file = document.getElementById('musicFileInput').files[0];
-  if (!file) return;
-  if (file.size > 10 * 1024 * 1024) return alert('文件太大了，请选 10MB 以内的～');
-
-  // Compress audio to reduce size
-  const audioCtx2 = new (window.AudioContext || window.webkitAudioContext)();
-  const arrayBuffer = await file.arrayBuffer();
-  const audioBuffer = await audioCtx2.decodeAudioData(arrayBuffer);
-
-  // Create compressed mono version at lower sample rate
-  const offlineCtx = new OfflineAudioContext(1, audioBuffer.duration * 22050, 22050);
-  const source = offlineCtx.createBufferSource();
-  source.buffer = audioBuffer;
-  source.connect(offlineCtx.destination);
-  source.start();
-  const rendered = await offlineCtx.startRendering();
-
-  // Convert to WAV
-  const wav = audioBufferToWav(rendered);
-  const blob = new Blob([wav], { type: 'audio/wav' });
-
-  document.getElementById('musicStatus').textContent = '⬆️ 上传中...';
-
-  const { data, error } = await db.storage.from('music').upload('custom.wav', blob, {
-    cacheControl: '3600', upsert: true, contentType: 'audio/wav'
+  currentSong = { name: f.name, url };
+  audioEl.play().then(() => {
+    isPlaying = true;
+    document.getElementById('musicPlayBtn').textContent = '⏸';
+    document.getElementById('musicBtn').classList.add('playing');
+    document.getElementById('musicStatus').textContent = '🎵 ' + f.name.replace(/\.[^.]+$/, '');
+    musicSpawnNotes();
+    db.from('settings').upsert({ key: 'music_url', value: url });
+  }).catch(() => {
+    document.getElementById('musicStatus').textContent = '⚠️ 播放失败';
   });
-  if (error) {
-    if (error.message.includes('not found') || error.message.includes('bucket')) {
-      return alert('请先在 Supabase Storage 中创建名为 music 的公开存储桶～');
-    }
-    return alert('上传失败: ' + error.message);
-  }
-  const { data: urlData } = db.storage.from('music').getPublicUrl('custom.wav');
-  const url = urlData.publicUrl;
-  document.getElementById('musicUrlInput').value = url;
-  await db.from('settings').upsert({ key: 'music_url', value: url });
-  stopAmbient();
-  musicSetupAudio(url);
-  document.getElementById('musicStatus').textContent = '🎵 自定义歌曲';
-  document.getElementById('musicFileInput').value = '';
+  loadMusicList();
 }
 
-// Simple WAV encoder
-function audioBufferToWav(buffer) {
-  const numChannels = buffer.numberOfChannels;
-  const sampleRate = buffer.sampleRate;
-  const format = 1; // PCM
-  const bitsPerSample = 16;
-  const data = buffer.getChannelData(0);
-  const dataLength = data.length * (bitsPerSample / 8);
-  const headerLength = 44;
-  const totalLength = headerLength + dataLength;
-  const arrayBuffer = new ArrayBuffer(totalLength);
-  const view = new DataView(arrayBuffer);
-
-  function writeString(offset, str) {
-    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+async function musicDeleteSong(i) {
+  const f = musicFileList[i];
+  if (!f) return;
+  if (!confirm('确定删除 "' + f.name + '" 吗？')) return;
+  const { error } = await db.storage.from('music').remove([f.name]);
+  if (error) return alert('删除失败: ' + error.message);
+  if (currentSong && currentSong.name === f.name) {
+    if (audioEl) { audioEl.pause(); audioEl = null; }
+    isPlaying = false;
+    currentSong = null;
+    document.getElementById('musicPlayBtn').textContent = '▶️';
+    document.getElementById('musicBtn').classList.remove('playing');
+    document.getElementById('musicStatus').textContent = '📂 上传歌曲到歌单';
   }
-  writeString(0, 'RIFF');
-  view.setUint32(4, totalLength - 8, true);
-  writeString(8, 'WAVE');
-  writeString(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, format, true);
-  view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true);
-  view.setUint16(32, numChannels * (bitsPerSample / 8), true);
-  view.setUint16(34, bitsPerSample, true);
-  writeString(36, 'data');
-  view.setUint32(40, dataLength, true);
-
-  let offset = 44;
-  for (let i = 0; i < data.length; i++) {
-    const sample = Math.max(-1, Math.min(1, data[i]));
-    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
-    offset += 2;
-  }
-  return arrayBuffer;
-}
-
-function musicTogglePanel() { document.getElementById('musicPanel').classList.toggle('show'); }
-function musicHidePanel() { document.getElementById('musicPanel').classList.remove('show'); }
-
-let searchResults = [];
-function musicSearch() {
-  const q = document.getElementById('musicSearch').value.trim();
-  if (!q) return;
-  const c = document.getElementById('musicResults');
-  c.innerHTML = '<div class="music-loading">🔍 搜索中...</div>';
-  searchResults = [];
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-  const signal = controller.signal;
-
-  function fail(msg) {
-    clearTimeout(timeout);
-    c.innerHTML = '<div class="music-loading">' + msg + '</div>';
-  }
-
-  function tryFallback3() {
-    fetch(`https://api.uomg.com/api/wangyiyun.search?key=${encodeURIComponent(q)}&limit=8`, { signal })
-      .then(r => r.json())
-      .then(data => {
-        clearTimeout(timeout);
-        if (data.code === 1 && data.data && data.data.length) {
-          searchResults = data.data.map(s => ({
-            name: s.songname || s.name || '未知',
-            artist: s.singer || s.artist || '',
-            url: s.url || s.mp3url || ''
-          }));
-          renderMusicResults(c);
-        } else { fail('没有找到，换个关键词试试'); }
-      })
-      .catch(() => fail('搜索暂不可用<br><span style="font-size:0.7rem">请粘贴链接或 📂 上传本地歌曲</span>'));
-  }
-
-  function tryFallback2() {
-    fetch(`https://api.vvhan.com/api/wangyiyun?key=${encodeURIComponent(q)}&type=song&limit=8`, { signal })
-      .then(r => r.json())
-      .then(data => {
-        clearTimeout(timeout);
-        if (data.success && data.data && data.data.length) {
-          searchResults = data.data.map(s => ({
-            name: s.songname || s.name || '未知',
-            artist: s.artist || s.author || '',
-            url: s.url || s.mp3url || s.musicurl || ''
-          }));
-          renderMusicResults(c);
-        } else { tryFallback3(); }
-      })
-      .catch(() => tryFallback3());
-  }
-
-  // Primary: Meting API (widely used, most reliable)
-  fetch(`https://api.injahow.cn/meting/?server=netease&type=search&id=${encodeURIComponent(q)}`, { signal })
-    .then(r => r.json())
-    .then(data => {
-      clearTimeout(timeout);
-      if (Array.isArray(data) && data.length) {
-        searchResults = data.slice(0, 8).map(s => ({
-          id: s.id || '',
-          name: s.name || s.songname || '未知',
-          artist: s.artist || s.singer || '',
-          url: s.url || ''  // may be empty, fetched on click
-        }));
-        renderMusicResults(c);
-      } else { tryFallback2(); }
-    })
-    .catch(() => tryFallback2());
-}
-
-function renderMusicResults(c) {
-  if (!searchResults.length) {
-    c.innerHTML = '<div class="music-loading">没有找到，换个关键词试试</div>';
-    return;
-  }
-  c.innerHTML = searchResults.map((r, i) => `
-    <div class="music-result-item" onclick="musicPlayResult(${i})">
-      <span class="mri-name">${r.name}</span>
-      <span class="mri-artist">${r.artist}</span>
-    </div>
-  `).join('');
-}
-
-async function musicPlayResult(i) {
-  const r = searchResults[i];
-  if (!r) return;
-
-  // Lazy-fetch play URL if not already available
-  if (!r.url && r.id) {
-    document.getElementById('musicStatus').textContent = '⏳ 获取播放链接...';
-    try {
-      const resp = await fetch(`https://api.injahow.cn/meting/?server=netease&type=url&id=${r.id}`);
-      const data = await resp.json();
-      r.url = (data && data.url) || '';
-    } catch(e) { r.url = ''; }
-  }
-
-  if (!r.url || !r.url.startsWith('http')) return alert('这首歌暂无播放链接，请换个试试～');
-
-  document.getElementById('musicUrlInput').value = r.url;
-  await db.from('settings').upsert({ key: 'music_url', value: r.url });
-  stopAmbient();
-  musicSetupAudio(r.url);
-  document.getElementById('musicStatus').textContent = '🎵 ' + r.name + ' - ' + r.artist;
-  document.getElementById('musicResults').innerHTML = '';
-  document.getElementById('musicSearch').value = '';
-  document.getElementById('musicPanel').classList.remove('show');
-  if (!isPlaying) musicTogglePlay();
+  loadMusicList();
 }
 
 function musicTogglePlay() {
   const btn = document.getElementById('musicPlayBtn');
   const disc = document.getElementById('musicBtn');
-
   if (isPlaying) {
-    // Stop
     if (audioEl) audioEl.pause();
-    stopAmbient();
-    btn.textContent = '▶️'; disc.classList.remove('playing'); isPlaying = false;
+    btn.textContent = '▶️';
+    disc.classList.remove('playing');
+    isPlaying = false;
   } else {
-    // Play
     if (audioEl) {
       audioEl.play().then(() => {
-        btn.textContent = '⏸'; disc.classList.add('playing'); isPlaying = true;
+        btn.textContent = '⏸';
+        disc.classList.add('playing');
+        isPlaying = true;
         musicSpawnNotes();
-      }).catch(() => { document.getElementById('musicStatus').textContent = '⚠️ 播放失败'; });
-    } else {
-      isPlaying = true;
-      startAmbient();
-      btn.textContent = '⏸'; disc.classList.add('playing');
-      musicSpawnNotes();
+      }).catch(() => {
+        document.getElementById('musicStatus').textContent = '⚠️ 播放失败';
+      });
     }
   }
 }
@@ -1640,6 +1365,31 @@ function musicTogglePlay() {
 function musicSetVolume(v) {
   if (audioEl) audioEl.volume = parseFloat(v);
 }
+
+async function musicUploadFile() {
+  const file = document.getElementById('musicFileInput').files[0];
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) return alert('文件太大了，请选 10MB 以内的～');
+  document.getElementById('musicStatus').textContent = '⬆️ 上传中...';
+  const { data, error } = await db.storage.from('music').upload(file.name, file, {
+    cacheControl: '3600', upsert: true, contentType: file.type || 'audio/mpeg'
+  });
+  if (error) {
+    if (error.message.includes('not found') || error.message.includes('bucket')) {
+      return alert('请先在 Supabase Storage 中创建名为 music 的公开存储桶～');
+    }
+    return alert('上传失败: ' + error.message);
+  }
+  document.getElementById('musicFileInput').value = '';
+  document.getElementById('musicStatus').textContent = '✅ 上传成功';
+  loadMusicList();
+}
+
+function musicTogglePanel() {
+  document.getElementById('musicPanel').classList.toggle('show');
+  if (document.getElementById('musicPanel').classList.contains('show')) loadMusicList();
+}
+function musicHidePanel() { document.getElementById('musicPanel').classList.remove('show'); }
 
 function musicSpawnNotes() {
   if (!isPlaying) return;
@@ -1654,19 +1404,6 @@ function musicSpawnNotes() {
   setTimeout(() => el.remove(), 2000);
   setTimeout(musicSpawnNotes, 800 + Math.random() * 1200);
 }
-
-// Auto-play on first click anywhere (but not on the music controls)
-let musicAutoStarted = false;
-document.addEventListener('click', function(e) {
-  if (musicAutoStarted) return;
-  if (e.target.closest('#musicPlayer')) return;
-  musicAutoStarted = true;
-  musicTogglePlay();
-  document.getElementById('musicStatus').textContent =
-    audioEl ? '🎵 自定义歌曲' : '🎹 默认旋律';
-});
-
-document.getElementById('musicUrlInput').addEventListener('change', musicSaveUrl);
 
 // ============================================================
 //  MISC
