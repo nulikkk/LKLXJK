@@ -693,10 +693,12 @@ body {
         <span style="font-weight:bold;color:var(--rose);font-size:0.85rem">🎵 音乐</span>
         <button onclick="musicHidePanel()" style="background:none;border:none;cursor:pointer;font-size:14px;color:#999">✕</button>
       </div>
-      <input type="text" id="musicUrlInput" placeholder="粘贴音乐链接..." spellcheck="false">
+      <input type="text" id="musicUrlInput" placeholder="粘贴音乐链接或直接上传..." spellcheck="false">
+      <input type="file" id="musicFileInput" accept="audio/*" style="display:none" onchange="musicUploadFile()">
       <div class="music-ctrl">
         <button onclick="musicTogglePlay()" id="musicPlayBtn">▶️</button>
         <input type="range" id="musicVolume" min="0" max="1" step="0.1" value="0.5" style="flex:1;height:4px;accent-color:var(--rose)" oninput="musicSetVolume(this.value)">
+        <button onclick="document.getElementById('musicFileInput').click()" title="上传本地歌曲" style="font-size:12px">📂</button>
       </div>
       <div style="font-size:0.7rem;color:#b06a7e;text-align:center" id="musicStatus">🎹 点击页面任意位置开始</div>
     </div>
@@ -1318,6 +1320,88 @@ function musicSetupAudio(url) {
   audioEl.volume = parseFloat(document.getElementById('musicVolume').value) || 0.5;
 }
 
+async function musicUploadFile() {
+  const file = document.getElementById('musicFileInput').files[0];
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) return alert('文件太大了，请选 10MB 以内的～');
+
+  // Compress audio to reduce size
+  const audioCtx2 = new (window.AudioContext || window.webkitAudioContext)();
+  const arrayBuffer = await file.arrayBuffer();
+  const audioBuffer = await audioCtx2.decodeAudioData(arrayBuffer);
+
+  // Create compressed mono version at lower sample rate
+  const offlineCtx = new OfflineAudioContext(1, audioBuffer.duration * 22050, 22050);
+  const source = offlineCtx.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(offlineCtx.destination);
+  source.start();
+  const rendered = await offlineCtx.startRendering();
+
+  // Convert to WAV
+  const wav = audioBufferToWav(rendered);
+  const blob = new Blob([wav], { type: 'audio/wav' });
+
+  document.getElementById('musicStatus').textContent = '⬆️ 上传中...';
+
+  const { data, error } = await db.storage.from('music').upload('custom.wav', blob, {
+    cacheControl: '3600', upsert: true, contentType: 'audio/wav'
+  });
+  if (error) {
+    if (error.message.includes('not found') || error.message.includes('bucket')) {
+      return alert('请先在 Supabase Storage 中创建名为 music 的公开存储桶～');
+    }
+    return alert('上传失败: ' + error.message);
+  }
+  const { data: urlData } = db.storage.from('music').getPublicUrl('custom.wav');
+  const url = urlData.publicUrl;
+  document.getElementById('musicUrlInput').value = url;
+  await db.from('settings').upsert({ key: 'music_url', value: url });
+  stopAmbient();
+  musicSetupAudio(url);
+  document.getElementById('musicStatus').textContent = '🎵 自定义歌曲';
+  document.getElementById('musicFileInput').value = '';
+}
+
+// Simple WAV encoder
+function audioBufferToWav(buffer) {
+  const numChannels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const format = 1; // PCM
+  const bitsPerSample = 16;
+  const data = buffer.getChannelData(0);
+  const dataLength = data.length * (bitsPerSample / 8);
+  const headerLength = 44;
+  const totalLength = headerLength + dataLength;
+  const arrayBuffer = new ArrayBuffer(totalLength);
+  const view = new DataView(arrayBuffer);
+
+  function writeString(offset, str) {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  }
+  writeString(0, 'RIFF');
+  view.setUint32(4, totalLength - 8, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true);
+  view.setUint16(32, numChannels * (bitsPerSample / 8), true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataLength, true);
+
+  let offset = 44;
+  for (let i = 0; i < data.length; i++) {
+    const sample = Math.max(-1, Math.min(1, data[i]));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+    offset += 2;
+  }
+  return arrayBuffer;
+}
+
 function musicTogglePanel() { document.getElementById('musicPanel').classList.toggle('show'); }
 function musicHidePanel() { document.getElementById('musicPanel').classList.remove('show'); }
 
@@ -1363,15 +1447,16 @@ function musicSpawnNotes() {
   setTimeout(musicSpawnNotes, 800 + Math.random() * 1200);
 }
 
-// Auto-play on first click anywhere
+// Auto-play on first click anywhere (but not on the music controls)
 let musicAutoStarted = false;
-document.addEventListener('click', function() {
+document.addEventListener('click', function(e) {
   if (musicAutoStarted) return;
+  if (e.target.closest('#musicPlayer')) return;
   musicAutoStarted = true;
   musicTogglePlay();
   document.getElementById('musicStatus').textContent =
     audioEl ? '🎵 自定义歌曲' : '🎹 默认旋律';
-}, { once: false });
+});
 
 document.getElementById('musicUrlInput').addEventListener('change', musicSaveUrl);
 
