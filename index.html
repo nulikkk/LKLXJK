@@ -1461,37 +1461,49 @@ function musicSearch() {
   c.innerHTML = '<div class="music-loading">🔍 搜索中...</div>';
   searchResults = [];
 
-  // Try public free music API
-  fetch(`https://api.vvhan.com/api/wangyiyun?key=${encodeURIComponent(q)}&type=song&limit=8`)
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  function done(ok, data) {
+    clearTimeout(timeout);
+    if (ok && data && data.length) {
+      searchResults = data;
+      renderMusicResults(c);
+    } else if (!ok) {
+      c.innerHTML = '<div class="music-loading">搜索暂不可用<br><span style="font-size:0.7rem">请粘贴链接或 📂 上传本地歌曲</span></div>';
+    } else {
+      c.innerHTML = '<div class="music-loading">没有找到，换个关键词试试</div>';
+    }
+  }
+
+  function tryFallback2() {
+    fetch(`https://api.uomg.com/api/wangyiyun.search?key=${encodeURIComponent(q)}&limit=8`, { signal: controller.signal })
+      .then(r => r.json())
+      .then(data => {
+        if (data.code === 1 && data.data) {
+          done(true, data.data.map(s => ({
+            name: s.songname || s.name || '未知',
+            artist: s.singer || s.artist || '',
+            url: s.url || s.mp3url || ''
+          })));
+        } else { done(true, null); }
+      })
+      .catch(() => { done(false); });
+  }
+
+  // Try vvhan first
+  fetch(`https://api.vvhan.com/api/wangyiyun?key=${encodeURIComponent(q)}&type=song&limit=8`, { signal: controller.signal })
     .then(r => r.json())
     .then(data => {
       if (data.success && data.data && data.data.length) {
-        searchResults = data.data.map(s => ({
+        done(true, data.data.map(s => ({
           name: s.songname || s.name || '未知',
           artist: s.artist || s.author || '',
           url: s.url || s.mp3url || s.musicurl || ''
-        }));
-      }
-      renderMusicResults(c);
+        })));
+      } else { tryFallback2(); }
     })
-    .catch(() => {
-      // Fallback: try another API
-      fetch(`https://api.uomg.com/api/wangyiyun.search?key=${encodeURIComponent(q)}&limit=8`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.code === 1 && data.data) {
-            searchResults = data.data.map(s => ({
-              name: s.songname || s.name || '未知',
-              artist: s.singer || s.artist || '',
-              url: s.url || s.mp3url || ''
-            }));
-          }
-          renderMusicResults(c);
-        })
-        .catch(() => {
-          c.innerHTML = '<div class="music-loading">搜索暂不可用<br><span style="font-size:0.7rem">请粘贴链接或 📂 上传本地歌曲</span></div>';
-        });
-    });
+    .catch(() => { tryFallback2(); });
 }
 
 function renderMusicResults(c) {
@@ -1543,8 +1555,9 @@ function musicTogglePlay() {
         musicSpawnNotes();
       }).catch(() => { document.getElementById('musicStatus').textContent = '⚠️ 播放失败'; });
     } else {
+      isPlaying = true;
       startAmbient();
-      btn.textContent = '⏸'; disc.classList.add('playing'); isPlaying = true;
+      btn.textContent = '⏸'; disc.classList.add('playing');
       musicSpawnNotes();
     }
   }
