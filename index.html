@@ -543,6 +543,49 @@ body {
 }
 .music-ctrl button:hover { background: var(--pink); }
 
+/* Music search */
+.music-search { display: flex; gap: 6px; margin-bottom: 4px; }
+.music-search input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 2px solid #f0d0da;
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  min-width: 0;
+}
+.music-search button {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: var(--pink-light);
+  cursor: pointer;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.music-results {
+  max-height: 180px;
+  overflow-y: auto;
+  margin-bottom: 4px;
+}
+.music-results::-webkit-scrollbar { width: 4px; }
+.music-results::-webkit-scrollbar-thumb { background: var(--pink); border-radius: 2px; }
+.music-loading { text-align: center; color: #999; padding: 10px; font-size: 0.8rem; }
+.music-result-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.15s;
+  border-bottom: 1px solid #fef0f3;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.music-result-item:hover { background: var(--pink-light); }
+.music-result-item .mri-name { font-weight: 500; color: #5d3a4a; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-result-item .mri-artist { font-size: 0.7rem; color: #999; margin-left: 6px; flex-shrink: 0; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ===== Floating Notes ===== */
 .note-float {
   position: fixed;
@@ -693,14 +736,19 @@ body {
         <span style="font-weight:bold;color:var(--rose);font-size:0.85rem">🎵 音乐</span>
         <button onclick="musicHidePanel()" style="background:none;border:none;cursor:pointer;font-size:14px;color:#999">✕</button>
       </div>
-      <input type="text" id="musicUrlInput" placeholder="粘贴音乐链接或直接上传..." spellcheck="false">
-      <input type="file" id="musicFileInput" accept="audio/*" style="display:none" onchange="musicUploadFile()">
+      <div class="music-search">
+        <input type="text" id="musicSearch" placeholder="搜索歌曲名或歌手..." spellcheck="false" onkeydown="if(event.key==='Enter')musicSearch()">
+        <button onclick="musicSearch()" style="display:flex;align-items:center;justify-content:center">🔍</button>
+      </div>
+      <div id="musicResults" class="music-results"></div>
       <div class="music-ctrl">
         <button onclick="musicTogglePlay()" id="musicPlayBtn">▶️</button>
         <input type="range" id="musicVolume" min="0" max="1" step="0.1" value="0.5" style="flex:1;height:4px;accent-color:var(--rose)" oninput="musicSetVolume(this.value)">
         <button onclick="document.getElementById('musicFileInput').click()" title="上传本地歌曲" style="font-size:12px">📂</button>
       </div>
       <div style="font-size:0.7rem;color:#b06a7e;text-align:center" id="musicStatus">🎹 点击页面任意位置开始</div>
+      <input type="text" id="musicUrlInput" placeholder="或直接粘贴音乐链接..." spellcheck="false" style="margin-top:4px;padding:6px 10px;border:2px solid #f0d0da;border-radius:12px;font-family:inherit;font-size:0.75rem;width:100%">
+      <input type="file" id="musicFileInput" accept="audio/*" style="display:none" onchange="musicUploadFile()">
     </div>
     <button class="music-btn" id="musicBtn" onclick="musicTogglePanel()" title="背景音乐">💿</button>
   </div>
@@ -1404,6 +1452,79 @@ function audioBufferToWav(buffer) {
 
 function musicTogglePanel() { document.getElementById('musicPanel').classList.toggle('show'); }
 function musicHidePanel() { document.getElementById('musicPanel').classList.remove('show'); }
+
+let searchResults = [];
+function musicSearch() {
+  const q = document.getElementById('musicSearch').value.trim();
+  if (!q) return;
+  const c = document.getElementById('musicResults');
+  c.innerHTML = '<div class="music-loading">🔍 搜索中...</div>';
+  searchResults = [];
+
+  // Try public free music API
+  fetch(`https://api.vvhan.com/api/wangyiyun?key=${encodeURIComponent(q)}&type=song&limit=8`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.success && data.data && data.data.length) {
+        searchResults = data.data.map(s => ({
+          name: s.songname || s.name || '未知',
+          artist: s.artist || s.author || '',
+          url: s.url || s.mp3url || s.musicurl || ''
+        }));
+      }
+      renderMusicResults(c);
+    })
+    .catch(() => {
+      // Fallback: try another API
+      fetch(`https://api.uomg.com/api/wangyiyun.search?key=${encodeURIComponent(q)}&limit=8`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.code === 1 && data.data) {
+            searchResults = data.data.map(s => ({
+              name: s.songname || s.name || '未知',
+              artist: s.singer || s.artist || '',
+              url: s.url || s.mp3url || ''
+            }));
+          }
+          renderMusicResults(c);
+        })
+        .catch(() => {
+          c.innerHTML = '<div class="music-loading">搜索暂不可用<br><span style="font-size:0.7rem">请粘贴链接或 📂 上传本地歌曲</span></div>';
+        });
+    });
+}
+
+function renderMusicResults(c) {
+  if (!searchResults.length) {
+    c.innerHTML = '<div class="music-loading">没有找到，换个关键词试试</div>';
+    return;
+  }
+  c.innerHTML = searchResults.map((r, i) => `
+    <div class="music-result-item" onclick="musicPlayResult(${i})">
+      <span class="mri-name">${r.name}</span>
+      <span class="mri-artist">${r.artist}</span>
+    </div>
+  `).join('');
+}
+
+async function musicPlayResult(i) {
+  const r = searchResults[i];
+  if (!r || !r.url) return alert('这首歌暂无播放链接，请换个试试～');
+  // Filter out invalid URLs
+  if (r.url.startsWith('http')) {
+    document.getElementById('musicUrlInput').value = r.url;
+    await db.from('settings').upsert({ key: 'music_url', value: r.url });
+    stopAmbient();
+    musicSetupAudio(r.url);
+    document.getElementById('musicStatus').textContent = '🎵 ' + r.name + ' - ' + r.artist;
+    document.getElementById('musicResults').innerHTML = '';
+    document.getElementById('musicSearch').value = '';
+    document.getElementById('musicPanel').classList.remove('show');
+    if (!isPlaying) musicTogglePlay();
+  } else {
+    alert('这首歌链接无效，请换个试试～');
+  }
+}
 
 function musicTogglePlay() {
   const btn = document.getElementById('musicPlayBtn');
