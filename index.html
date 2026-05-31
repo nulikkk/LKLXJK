@@ -794,10 +794,31 @@ let noteData = [];
 // ============================================================
 //  INIT — 连接 Supabase 并加载数据
 // ============================================================
+// ===== Cache helpers =====
+function loadCache() {
+  try {
+    timelineData = JSON.parse(localStorage.getItem('lklk_timeline') || '[]');
+    diaryData    = JSON.parse(localStorage.getItem('lklk_diary')    || '[]');
+    photoData    = JSON.parse(localStorage.getItem('lklk_photos')  || '[]');
+    noteData     = JSON.parse(localStorage.getItem('lklk_notes')   || '[]');
+  } catch(e) { timelineData=[]; diaryData=[]; photoData=[]; noteData=[]; }
+}
+function saveCache() {
+  localStorage.setItem('lklk_timeline', JSON.stringify(timelineData));
+  localStorage.setItem('lklk_diary',    JSON.stringify(diaryData));
+  localStorage.setItem('lklk_photos',   JSON.stringify(photoData));
+  localStorage.setItem('lklk_notes',    JSON.stringify(noteData));
+}
+
 async function init() {
   if (typeof supabase === 'undefined') { setTimeout(init, 500); return; }
   db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+  // 1. Show cached data immediately so page isn't blank
+  loadCache();
+  renderAll();
+
+  // 2. Fetch fresh data in background
   try {
     const [tl, di, ph, nt] = await Promise.all([
       db.from('timeline').select('*').order('date', { ascending: true }),
@@ -805,10 +826,15 @@ async function init() {
       db.from('photos').select('*').order('created_at', { ascending: false }),
       db.from('notes').select('*').order('created_at', { ascending: false })
     ]);
-    if (tl.data) timelineData = tl.data;
-    if (di.data) diaryData = di.data;
-    if (ph.data) photoData = ph.data;
-    if (nt.data) noteData = nt.data;
+    let changed = false;
+    if (tl.data) { timelineData = tl.data; changed = true; }
+    if (di.data) { diaryData    = di.data; changed = true; }
+    if (ph.data) { photoData    = ph.data; changed = true; }
+    if (nt.data) { noteData     = nt.data; changed = true; }
+    if (changed) {
+      renderAll();
+      saveCache();
+    }
     document.getElementById('syncStatus').style.display = 'inline';
   } catch (e) {
     console.error('连接数据库失败:', e);
@@ -817,7 +843,6 @@ async function init() {
     document.getElementById('syncStatus').style.display = 'inline';
   }
 
-  renderAll();
   setupRealtime();
   loadMusicList();
 
@@ -855,7 +880,7 @@ function setupRealtime() {
     db.channel(table + '-rt')
       .on('postgres_changes', { event: '*', schema: 'public', table }, async () => {
         const { data } = await db.from(table).select('*');
-        if (data) { setter(data); renderFn(); if (table === 'photos') renderTagFilter(); }
+        if (data) { setter(data); renderFn(); if (table === 'photos') renderTagFilter(); saveCache(); }
       }).subscribe();
   };
   watch('timeline', d => { timelineData = d; }, renderTimeline);
@@ -1013,7 +1038,7 @@ async function addTimelineEvent() {
   const { error } = await db.from('timeline').insert([{ date, title, description: desc, image: image || null }]);
   if (error) { alert('添加失败: ' + error.message); return; }
   const { data } = await db.from('timeline').select('*').order('date', { ascending: true });
-  if (data) { timelineData = data; renderTimeline(); }
+  if (data) { timelineData = data; renderTimeline(); saveCache(); }
   document.getElementById('newEventDate').value = '';
   document.getElementById('newEventTitle').value = '';
   document.getElementById('newEventDesc').value = '';
@@ -1052,7 +1077,7 @@ async function saveDiary() {
   const { error } = await db.from('diary').insert([{ date, content, mood: currentMood }]);
   if (error) { alert('保存失败: ' + error.message); return; }
   const { data } = await db.from('diary').select('*').order('date', { ascending: false });
-  if (data) { diaryData = data; renderDiaryList(); }
+  if (data) { diaryData = data; renderDiaryList(); saveCache(); }
   document.getElementById('diaryContent').value = '';
 }
 
@@ -1082,7 +1107,7 @@ async function deleteDiary(id) {
   const { error } = await db.from('diary').delete().eq('id', id);
   if (error) { alert('删除失败: ' + error.message); return; }
   const { data } = await db.from('diary').select('*').order('date', { ascending: false });
-  if (data) { diaryData = data; renderDiaryList(); }
+  if (data) { diaryData = data; renderDiaryList(); saveCache(); }
 }
 
 function openEditDiary(id) {
@@ -1110,7 +1135,7 @@ async function saveEditDiary() {
   const { error } = await db.from('diary').update({ content, mood: editMood }).eq('id', currentEditId);
   if (error) { alert('更新失败: ' + error.message); return; }
   const { data } = await db.from('diary').select('*').order('date', { ascending: false });
-  if (data) { diaryData = data; renderDiaryList(); }
+  if (data) { diaryData = data; renderDiaryList(); saveCache(); }
   closeEditModal();
 }
 
@@ -1142,7 +1167,7 @@ document.getElementById('photoInput').addEventListener('change', function() {
       const { error } = await db.from('photos').insert([{ title, src: compressed, date, tags }]);
       if (error) { alert('上传失败: ' + error.message); return; }
       const { data } = await db.from('photos').select('*').order('created_at', { ascending: false });
-      if (data) { photoData = data; renderPhotos(); renderTagFilter(); }
+      if (data) { photoData = data; renderPhotos(); renderTagFilter(); saveCache(); }
       document.getElementById('photoTitle').value = '';
       document.getElementById('photoTags').value = '';
       document.getElementById('photoInput').value = '';
@@ -1206,7 +1231,7 @@ async function deletePhoto(id) {
   const { error } = await db.from('photos').delete().eq('id', id);
   if (error) { alert('删除失败: ' + error.message); return; }
   const { data } = await db.from('photos').select('*').order('created_at', { ascending: false });
-  if (data) { photoData = data; renderPhotos(); renderTagFilter(); }
+  if (data) { photoData = data; renderPhotos(); renderTagFilter(); saveCache(); }
 }
 
 function openLightbox(id) {
@@ -1239,7 +1264,7 @@ async function addNote() {
   }]);
   if (error) { alert('添加失败: ' + error.message); return; }
   const { data } = await db.from('notes').select('*').order('created_at', { ascending: false });
-  if (data) { noteData = data; renderNotes(); }
+  if (data) { noteData = data; renderNotes(); saveCache(); }
   document.getElementById('noteContent').value = '';
 }
 
@@ -1247,7 +1272,7 @@ async function deleteNote(id) {
   const { error } = await db.from('notes').delete().eq('id', id);
   if (error) { alert('删除失败: ' + error.message); return; }
   const { data } = await db.from('notes').select('*').order('created_at', { ascending: false });
-  if (data) { noteData = data; renderNotes(); }
+  if (data) { noteData = data; renderNotes(); saveCache(); }
 }
 
 function renderNotes() {
