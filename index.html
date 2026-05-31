@@ -799,15 +799,18 @@ function loadCache() {
   try {
     timelineData = JSON.parse(localStorage.getItem('lklk_timeline') || '[]');
     diaryData    = JSON.parse(localStorage.getItem('lklk_diary')    || '[]');
-    photoData    = JSON.parse(localStorage.getItem('lklk_photos')  || '[]');
-    noteData     = JSON.parse(localStorage.getItem('lklk_notes')   || '[]');
-  } catch(e) { timelineData=[]; diaryData=[]; photoData=[]; noteData=[]; }
+    noteData     = JSON.parse(localStorage.getItem('lklk_notes')    || '[]');
+  } catch(e) { timelineData=[]; diaryData=[]; noteData=[]; }
+  // 照片太大不缓存，清除旧的缓存释放空间
+  try { localStorage.removeItem('lklk_photos'); } catch(e) {}
+  photoData = [];
 }
 function saveCache() {
-  localStorage.setItem('lklk_timeline', JSON.stringify(timelineData));
-  localStorage.setItem('lklk_diary',    JSON.stringify(diaryData));
-  localStorage.setItem('lklk_photos',   JSON.stringify(photoData));
-  localStorage.setItem('lklk_notes',    JSON.stringify(noteData));
+  // 逐 key 保存，一个超量不影响其他数据
+  try { localStorage.setItem('lklk_timeline', JSON.stringify(timelineData)); } catch(e) {}
+  try { localStorage.setItem('lklk_diary',    JSON.stringify(diaryData)); } catch(e) {}
+  try { localStorage.setItem('lklk_notes',    JSON.stringify(noteData)); } catch(e) {}
+  // 照片 base64 太大，跳过 localStorage 缓存，直接从 Supabase 加载
 }
 
 async function tryReconnect() {
