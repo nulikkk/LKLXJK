@@ -810,6 +810,41 @@ function saveCache() {
   localStorage.setItem('lklk_notes',    JSON.stringify(noteData));
 }
 
+async function tryReconnect() {
+  const s = document.getElementById('syncStatus');
+  s.textContent = '⟳ 重连中';
+  s.style.color = '#ff9800';
+  s.style.cursor = 'default';
+  s.onclick = null;
+  try {
+    const [tl, di, ph, nt] = await Promise.all([
+      db.from('timeline').select('*').order('date', { ascending: true }),
+      db.from('diary').select('*').order('date', { ascending: false }),
+      db.from('photos').select('*').order('created_at', { ascending: false }),
+      db.from('notes').select('*').order('created_at', { ascending: false })
+    ]);
+    let ch = false;
+    if (tl.data) { timelineData = tl.data; ch = true; }
+    if (di.data) { diaryData    = di.data; ch = true; }
+    if (ph.data) { photoData    = ph.data; ch = true; }
+    if (nt.data) { noteData     = nt.data; ch = true; }
+    if (ch) { renderAll(); saveCache(); }
+    s.textContent = '●';
+    s.style.color = '#4caf50';
+    s.style.display = 'inline';
+    s.style.cursor = 'default';
+    s.onclick = null;
+    s.title = '';
+  } catch (e) {
+    console.error('重连失败:', e);
+    s.textContent = '⚠️ 离线';
+    s.style.color = '#ff9800';
+    s.style.cursor = 'pointer';
+    s.title = '点击重新连接';
+    s.onclick = tryReconnect;
+  }
+}
+
 async function init() {
   if (typeof supabase === 'undefined') { setTimeout(init, 500); return; }
   db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -838,9 +873,16 @@ async function init() {
     document.getElementById('syncStatus').style.display = 'inline';
   } catch (e) {
     console.error('连接数据库失败:', e);
-    document.getElementById('syncStatus').textContent = '⚠️ 离线';
-    document.getElementById('syncStatus').style.color = '#ff9800';
-    document.getElementById('syncStatus').style.display = 'inline';
+    const s = document.getElementById('syncStatus');
+    s.textContent = '⚠️ 离线';
+    s.style.color = '#ff9800';
+    s.style.display = 'inline';
+    s.style.cursor = 'pointer';
+    s.title = '点击重新连接';
+    s.onclick = tryReconnect;
+    let r = 0;
+    const doR = () => { r++; if (r > 3) return; tryReconnect(); };
+    setTimeout(doR, 3000);
   }
 
   setupRealtime();
